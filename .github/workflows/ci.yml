@@ -1,0 +1,37 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install
+        run: pip install -e ".[dev]"
+
+      - name: Lint
+        run: ruff check src tests && ruff format --check src tests
+
+      - name: Docs are up to date
+        run: python scripts/build_docs.py && git diff --exit-code docs/
+
+      - name: Tests (unit + local Spark pipeline)
+        run: pytest
+
+      - name: Build wheel
+        run: python -m pip wheel . --no-deps --wheel-dir dist
