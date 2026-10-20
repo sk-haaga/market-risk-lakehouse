@@ -1,0 +1,196 @@
+# Data quality checks that run after the pipeline and the risk job (job task 4).
+#
+# Pipeline expectations (CONSTRAINT ... EXPECT in src/pipeline/**.sql) test individual
+# rows while data flows through the pipeline. The checks below cover what row-level
+# expectations cannot: primary keys, referential integrity, freshness, cross-table
+# reconciliation, and the tables written by the Python risk job.
+#
+# Every check compiles to a SQL query returning the failing rows; a check passes when
+# that query returns zero rows. severity: error fails the job, warn is only recorded.
+#
+# Check types: unique, not_null, accepted_values, relationships, row_count, freshness,
+#              expression (row-level boolean that must hold), sql (custom failing-rows query)
+
+tables:
+
+  # ---------------------------------------------------------------- silver
+  silver_fx_rates:
+    checks:
+      - {type: unique, columns: [currency, rate_date]}
+      - {type: not_null, columns: [currency, rate_date, fx_rate]}
+      - {type: freshness, column: rate_date, max_age_days: 7}
+      - {type: row_count, min: 250}
+
+  silver_index_prices:
+    checks:
+      - {type: unique, columns: [risk_factor_id, price_date]}
+      - {type: not_null, columns: [risk_factor_id, price_date, close_price]}
+      - {type: relationships, column: risk_factor_id, to: silver_risk_factors, field: risk_factor_id}
+      - {type: freshness, column: price_date, max_age_days: 7}
+
+  silver_risk_factors:
+    checks:
+      - {type: unique, columns: [risk_factor_id]}
+      - {type: unique, columns: [source, source_series_id]}
+      - name: every_fx_currency_has_rates
+        type: sql
+        description: Every FX risk factor has at least one ECB rate in silver_fx_rates
+        sql: |
+          SELECT rf.risk_factor_id FROM {silver_risk_factors} rf
+          LEFT JOIN (SELECT DISTINCT currency FROM {silver_fx_rates}) fx ON fx.currency = rf.quote_currency
+          WHERE rf.asset_class = 'FX' AND fx.currency IS NULL
+
+  silver_positions:
+    checks:
+      - {type: unique, columns: [position_id]}
+      - {type: relationships, column: risk_factor_id, to: silver_risk_factors, field: risk_factor_id}
+      - name: one_position_per_factor_per_portfolio
+        type: sql
+        severity: warn
+        description: Duplicate exposures to the same factor in one portfolio are usually a data entry error
+        sql: |
+          SELECT portfolio_id, risk_factor_id FROM {silver_positions}
+          GROUP BY portfolio_id, risk_factor_id HAVING count(*) > 1
+
+  # ---------------------------------------------------------------- gold (pipeline)
+  gold_dim_date:
+    checks:
+      - {type: unique, columns: [calendar_date]}
+      - name: no_gaps_in_calendar
+        type: sql
+        description: The calendar is a contiguous daily spine
+        sql: |
+          SELECT 1 FROM {gold_dim_date}
+          HAVING count(*) <> datediff(max(calendar_date), min(calendar_date)) + 1
+
+  gold_dim_risk_factor:
+    checks:
+      - {type: unique, columns: [risk_factor_id]}
+      - {type: not_null, columns: [first_price_date, last_price_date]}
+
+  gold_dim_position:
+    checks:
+      - {type: unique, columns: [position_id]}
+      - {type: relationships, column: risk_factor_id, to: gold_dim_risk_factor, field: risk_factor_id}
+
+  gold_fact_market_prices_eur:
+    checks:
+      - {type: unique, columns: [risk_factor_id, price_date]}
+      - {type: relationships, column: risk_factor_id, to: gold_dim_risk_factor, field: risk_factor_id}
+      - {type: relationships, column: price_date, to: gold_dim_date, field: calendar_date}
+      - name: filled_share_below_10pct
+        type: sql
+        severity: warn
+        description: Fewer than 10% of prices per factor should be carried forward
+        sql: |
+          SELECT risk_factor_id FROM {gold_fact_market_prices_eur}
+          GROUP BY risk_factor_id HAVING avg(CAST(is_filled AS DOUBLE)) > 0.10
+
+  gold_fact_risk_factor_returns:
+    checks:
+      - {type: unique, columns: [risk_factor_id, price_date]}
+      - {type: expression, expression: "prev_price_date < price_date"}
+
+  gold_fact_position_exposure_daily:
+    checks:
+      - {type: unique, columns: [position_id, as_of_date]}
+      - {type: relationships, column: position_id, to: gold_dim_position, field: position_id}
+      - {type: relationships, column: as_of_date, to: gold_dim_date, field: calendar_date}
+
+  gold_fact_position_pnl_daily:
+    checks:
+      - {type: unique, columns: [position_id, pnl_date]}
+      - {type: relationships, column: position_id, to: gold_dim_position, field: position_id}
+
+  gold_fact_portfolio_pnl_daily:
+    checks:
+      - {type: unique, columns: [portfolio_id, pnl_date]}
+      - name: reconciles_to_position_pnl
+        type: sql
+        description: Portfolio P&L equals the sum of position P&L on every date
+        sql: |
+          SELECT p.pnl_date, p.portfolio_id FROM {gold_fact_portfolio_pnl_daily} p
+          JOIN (SELECT pnl_date, portfolio_id, sum(pnl_eur) AS pnl_eur FROM {gold_fact_position_pnl_daily}
+                GROUP BY pnl_date, portfolio_id) x
+            ON x.pnl_date = p.pnl_date AND x.portfolio_id = p.portfolio_id
+          WHERE abs(x.pnl_eur - p.pnl_eur) > 0.01
+      - name: pnl_equals_change_in_value
+        type: sql
+        description: P&L equals the day-on-day change in portfolio market value (static positions)
+        sql: |
+          WITH v AS (SELECT as_of_date, portfolio_id, sum(exposure_eur) AS value_eur
+                     FROM {gold_fact_position_exposure_daily} GROUP BY as_of_date, portfolio_id),
+               d AS (SELECT as_of_date, portfolio_id, value_eur,
+                            lag(value_eur) OVER (PARTITION BY portfolio_id ORDER BY as_of_date) AS prev_value_eur
+                     FROM v)
+          SELECT p.pnl_date FROM {gold_fact_portfolio_pnl_daily} p
+          JOIN d ON d.as_of_date = p.pnl_date AND d.portfolio_id = p.portfolio_id
+          WHERE abs((d.value_eur - d.prev_value_eur) - p.pnl_eur) > 0.01
+
+  # ---------------------------------------------------------------- gold (risk job)
+  gold_dim_risk_method:
+    checks:
+      - {type: unique, columns: [method]}
+      - {type: accepted_values, column: method, values: [historical, parametric_normal, parametric_ewma]}
+
+  gold_fact_var_daily:
+    checks:
+      - {type: unique, columns: [portfolio_id, as_of_date, method, confidence_level]}
+      - {type: not_null, columns: [var_eur, es_eur, portfolio_value_eur]}
+      - {type: expression, name: var_non_negative, expression: "var_eur >= 0"}
+      - {type: expression, name: es_at_least_var, expression: "es_eur >= var_eur - 1e-6"}
+      - {type: expression, name: var_below_gross_exposure, expression: "var_eur < gross_exposure_eur"}
+      - {type: relationships, column: method, to: gold_dim_risk_method, field: method}
+      - {type: freshness, column: as_of_date, max_age_days: 7}
+      - name: one_open_forecast_per_series
+        type: sql
+        description: Only the latest as_of_date may have no forecast_date
+        sql: |
+          SELECT portfolio_id, method, confidence_level FROM {gold_fact_var_daily}
+          WHERE forecast_date IS NULL GROUP BY portfolio_id, method, confidence_level HAVING count(*) > 1
+
+  gold_fact_risk_contribution:
+    checks:
+      - {type: unique, columns: [portfolio_id, as_of_date, method, confidence_level, risk_factor_id]}
+      - {type: relationships, column: risk_factor_id, to: gold_dim_risk_factor, field: risk_factor_id}
+      - name: contributions_add_up
+        type: sql
+        description: Contributions sum to ES (historical) or VaR (parametric)
+        sql: |
+          SELECT c.portfolio_id, c.as_of_date, c.method, c.confidence_level
+          FROM {gold_fact_risk_contribution} c
+          JOIN {gold_fact_var_daily} v
+            ON v.portfolio_id = c.portfolio_id AND v.as_of_date = c.as_of_date
+           AND v.method = c.method AND v.confidence_level = c.confidence_level
+          GROUP BY c.portfolio_id, c.as_of_date, c.method, c.confidence_level, v.var_eur, v.es_eur
+          HAVING abs(sum(c.contribution_eur)
+                     - CASE WHEN c.method = 'historical' THEN v.es_eur ELSE v.var_eur END) > 0.01
+
+  gold_fact_var_backtest:
+    checks:
+      - {type: unique, columns: [portfolio_id, forecast_date, method, confidence_level]}
+      - {type: expression, name: breach_flag_consistent, expression: "is_breach = (loss_eur > var_eur)"}
+      - {type: expression, name: forecast_after_as_of, expression: "forecast_date > as_of_date"}
+      - {type: accepted_values, column: traffic_light_zone, values: [GREEN, YELLOW, RED, WARMING_UP]}
+      - name: pnl_matches_gold_pnl
+        type: sql
+        description: Backtest P&L is the gold hypothetical P&L for the same date
+        sql: |
+          SELECT b.forecast_date FROM {gold_fact_var_backtest} b
+          JOIN {gold_fact_portfolio_pnl_daily} p
+            ON p.pnl_date = b.forecast_date AND p.portfolio_id = b.portfolio_id
+          WHERE abs(p.pnl_eur - b.pnl_eur) > 0.01
+
+  gold_backtest_summary:
+    checks:
+      - {type: unique, columns: [portfolio_id, method, confidence_level]}
+      - {type: accepted_values, column: model_result, values: [ACCEPT, REJECT]}
+      - name: breaches_match_detail
+        type: sql
+        description: Summary breach counts equal the detailed backtest
+        sql: |
+          SELECT s.method FROM {gold_backtest_summary} s
+          JOIN (SELECT portfolio_id, method, confidence_level, count(*) AS n, sum(CAST(is_breach AS INT)) AS x
+                FROM {gold_fact_var_backtest} GROUP BY portfolio_id, method, confidence_level) d
+            ON d.portfolio_id = s.portfolio_id AND d.method = s.method AND d.confidence_level = s.confidence_level
+          WHERE d.n <> s.n_observations OR d.x <> s.n_breaches
