@@ -1,0 +1,166 @@
+// =============================================================================
+// Market Risk Lakehouse - Power BI measures
+// Paste into a "Measures" table (Modeling > New table: Measures = {BLANK()}),
+// one measure per block. Table names follow the renames in powerbi/README.md.
+// Method and Confidence slicers are single-select on every page.
+// =============================================================================
+
+// ---------------------------------------------------------------- Exposures
+Exposure EUR =
+SUM ( 'Exposure'[exposure_eur] )
+
+Exposure Date (Latest) =
+CALCULATE ( MAX ( 'Exposure'[as_of_date] ), ALLSELECTED ( 'Date' ) )
+
+Net Exposure EUR (Latest) =
+VAR d = [Exposure Date (Latest)]
+RETURN
+    CALCULATE ( [Exposure EUR], 'Date'[calendar_date] = d )
+
+Gross Exposure EUR (Latest) =
+SUMX (
+    VALUES ( 'Position'[position_id] ),
+    ABS ( [Net Exposure EUR (Latest)] )
+)
+
+Long Exposure EUR (Latest) =
+CALCULATE ( [Net Exposure EUR (Latest)], 'Position'[direction] = "LONG" )
+
+Short Exposure EUR (Latest) =
+CALCULATE ( [Net Exposure EUR (Latest)], 'Position'[direction] = "SHORT" )
+
+Exposure Share of Gross =
+DIVIDE (
+    ABS ( [Net Exposure EUR (Latest)] ),
+    CALCULATE ( [Gross Exposure EUR (Latest)], ALLSELECTED ( 'Position' ) )
+)
+
+// ---------------------------------------------------------------- VaR / ES
+VaR EUR =
+SUM ( 'VaR'[var_eur] )
+
+ES EUR =
+SUM ( 'VaR'[es_eur] )
+
+VaR Date (Latest) =
+CALCULATE ( MAX ( 'VaR'[as_of_date] ), ALLSELECTED ( 'Date' ) )
+
+VaR EUR (Latest) =
+VAR d = [VaR Date (Latest)]
+RETURN
+    CALCULATE ( [VaR EUR], 'Date'[calendar_date] = d )
+
+ES EUR (Latest) =
+VAR d = [VaR Date (Latest)]
+RETURN
+    CALCULATE ( [ES EUR], 'Date'[calendar_date] = d )
+
+VaR % of Gross (Latest) =
+VAR d = [VaR Date (Latest)]
+RETURN
+    CALCULATE ( SUM ( 'VaR'[var_pct] ), 'Date'[calendar_date] = d )
+
+VaR Change 1M =
+VAR d = [VaR Date (Latest)]
+VAR prior =
+    CALCULATE (
+        [VaR EUR],
+        'Date'[calendar_date]
+            = CALCULATE (
+                MAX ( 'VaR'[as_of_date] ),
+                'Date'[calendar_date] <= EDATE ( d, -1 ),
+                ALLSELECTED ( 'Date' )
+            )
+    )
+RETURN
+    DIVIDE ( [VaR EUR (Latest)] - prior, prior )
+
+ES / VaR Ratio =
+DIVIDE ( [ES EUR], [VaR EUR] )
+
+VaR 20D Average =
+AVERAGEX (
+    DATESINPERIOD ( 'Date'[calendar_date], MAX ( 'Date'[calendar_date] ), -28, DAY ),
+    [VaR EUR]
+)
+
+// ---------------------------------------------------------------- Risk contributions
+Risk Contribution EUR (Latest) =
+VAR d = [VaR Date (Latest)]
+RETURN
+    CALCULATE ( SUM ( 'Risk Contribution'[contribution_eur] ), 'Date'[calendar_date] = d )
+
+Risk Contribution % (Latest) =
+VAR d = [VaR Date (Latest)]
+RETURN
+    CALCULATE ( SUM ( 'Risk Contribution'[contribution_pct] ), 'Date'[calendar_date] = d )
+
+// ---------------------------------------------------------------- Backtest
+Realised P&L EUR =
+SUM ( 'Backtest'[pnl_eur] )
+
+VaR Threshold (P&L axis) =
+-SUM ( 'Backtest'[var_eur] )
+
+ES Threshold (P&L axis) =
+-SUM ( 'Backtest'[es_eur] )
+
+Backtest Days =
+COUNTROWS ( 'Backtest' )
+
+Breaches =
+CALCULATE ( COUNTROWS ( 'Backtest' ), 'Backtest'[is_breach] = TRUE () ) + 0
+
+Expected Breaches =
+SUMX ( 'Backtest', 1 - 'Backtest'[confidence_level] )
+
+Breach Rate =
+DIVIDE ( [Breaches], [Backtest Days] )
+
+Breach P&L EUR =
+// plot as markers on top of the P&L series: only breach days have a value
+CALCULATE ( [Realised P&L EUR], 'Backtest'[is_breach] = TRUE () )
+
+Excess Loss EUR =
+SUM ( 'Backtest'[excess_loss_eur] )
+
+Backtest Date (Latest) =
+CALCULATE ( MAX ( 'Backtest'[forecast_date] ), ALLSELECTED ( 'Date' ) )
+
+Breaches Last 250D (Latest) =
+VAR d = [Backtest Date (Latest)]
+RETURN
+    CALCULATE ( MAX ( 'Backtest'[breaches_last_250d] ), 'Date'[calendar_date] = d )
+
+Traffic Light (Latest) =
+VAR d = [Backtest Date (Latest)]
+RETURN
+    CALCULATE ( SELECTEDVALUE ( 'Backtest'[traffic_light_zone] ), 'Date'[calendar_date] = d )
+
+Traffic Light Colour =
+SWITCH (
+    [Traffic Light (Latest)],
+    "GREEN", "#2E7D32",
+    "YELLOW", "#F9A825",
+    "RED", "#C62828",
+    "#9E9E9E"
+)
+
+// ---------------------------------------------------------------- Backtest statistics
+Kupiec p-value =
+SELECTEDVALUE ( 'Backtest Summary'[kupiec_pvalue] )
+
+Christoffersen p-value =
+SELECTEDVALUE ( 'Backtest Summary'[christoffersen_pvalue] )
+
+Conditional Coverage p-value =
+SELECTEDVALUE ( 'Backtest Summary'[conditional_coverage_pvalue] )
+
+ES Ratio =
+SELECTEDVALUE ( 'Backtest Summary'[es_ratio] )
+
+Model Result =
+SELECTEDVALUE ( 'Backtest Summary'[model_result], "Select one method and confidence" )
+
+Model Result Colour =
+IF ( [Model Result] = "ACCEPT", "#2E7D32", IF ( [Model Result] = "REJECT", "#C62828", "#9E9E9E" ) )
