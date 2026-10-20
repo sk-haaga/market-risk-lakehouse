@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+
+# Local runs
+local_data/
+landing/
+spark-warehouse/
+metastore_db/
+derby.log
+
+# Databricks
+.databricks/
+
+# Power BI (binary, embeds data)
+*.pbix
+*.pbit
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

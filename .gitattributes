@@ -1,0 +1,4 @@
+# Keep LF line endings on every OS (CI checks formatting and generated docs byte for byte)
+* text=auto eol=lf
+*.png binary
+*.pbix binary

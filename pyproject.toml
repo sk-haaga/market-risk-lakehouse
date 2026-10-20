@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "market_risk"
+version = "0.1.0"
+description = "Market Risk Lakehouse: ECB FX + index prices on Databricks, VaR / Expected Shortfall and VaR backtesting."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.23",
+    "pandas>=1.5",
+    "scipy>=1.9",
+    "requests>=2.31",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pyspark>=3.5", "ruff>=0.5"]
+
+[project.scripts]
+ingest_market_data = "market_risk.jobs.ingest:main"
+compute_risk = "market_risk.jobs.compute_risk:main"
+run_quality_checks = "market_risk.jobs.run_quality_checks:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["market_risk*"]
+
+[tool.setuptools.package-data]
+market_risk = ["reference/*.csv", "quality/*.yml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["spark: tests that start a local Spark session (slower)"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]  # long strings (descriptions, SQL); the formatter handles code
