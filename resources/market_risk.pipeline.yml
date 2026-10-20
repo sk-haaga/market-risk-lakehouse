@@ -1,0 +1,27 @@
+resources:
+  pipelines:
+    market_risk_pipeline:
+      name: market-risk-medallion
+      catalog: ${var.catalog}
+      schema: ${resources.schemas.market_risk.name}
+      serverless: true
+      channel: CURRENT
+      photon: true
+      continuous: false
+      configuration:
+        landing_root: /Volumes/${var.catalog}/${resources.schemas.market_risk.name}/landing
+      libraries:
+        - file:
+            path: ../src/pipeline/bronze/bronze_market_data.sql
+        - file:
+            path: ../src/pipeline/bronze/bronze_reference_data.sql
+        - file:
+            path: ../src/pipeline/silver/silver_reference_data.sql
+        - file:
+            path: ../src/pipeline/silver/silver_market_data.sql
+        - file:
+            path: ../src/pipeline/gold/gold_dimensions.sql
+        - file:
+            path: ../src/pipeline/gold/gold_market_data.sql
+        - file:
+            path: ../src/pipeline/gold/gold_exposure_pnl.sql

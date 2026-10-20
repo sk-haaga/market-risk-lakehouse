@@ -1,0 +1,40 @@
+# Databricks Asset Bundle for the Market Risk Lakehouse.
+#
+#   databricks bundle validate
+#   databricks bundle deploy            # dev target (default)
+#   databricks bundle run market_risk_daily
+#
+# Works on Databricks Free Edition (serverless only, default catalog "workspace").
+
+bundle:
+  name: market_risk_lakehouse
+
+include:
+  - resources/*.yml
+
+variables:
+  catalog:
+    description: Unity Catalog catalog for all tables and the landing volume
+    default: workspace
+  schema:
+    description: Schema for all tables and the landing volume
+    default: market_risk
+  history_start:
+    description: First date loaded on the initial (or a full-refresh) run
+    default: "2016-01-01"
+
+artifacts:
+  market_risk_wheel:
+    type: whl
+    path: .
+    build: python -m pip wheel . --no-deps --wheel-dir dist
+
+targets:
+  dev:
+    mode: development
+    default: true
+
+  prod:
+    mode: production
+    variables:
+      schema: market_risk_prod

@@ -1,0 +1,73 @@
+resources:
+  jobs:
+    market_risk_daily:
+      name: market-risk-daily
+      description: >
+        Ingest ECB FX rates and FRED index prices, refresh the medallion pipeline,
+        compute VaR / ES and the VaR backtest, then run the data quality checks.
+
+      # Tue-Sat morning (Helsinki): FRED publishes US index closes the morning after.
+      schedule:
+        quartz_cron_expression: "0 30 7 ? * TUE-SAT"
+        timezone_id: Europe/Helsinki
+        pause_status: UNPAUSED
+
+      max_concurrent_runs: 1
+      email_notifications:
+        on_failure: []
+
+      tasks:
+        - task_key: ingest_market_data
+          environment_key: default
+          python_wheel_task:
+            package_name: market_risk
+            entry_point: ingest_market_data
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${resources.schemas.market_risk.name}
+              - --volume
+              - landing
+              - --start-date
+              - ${var.history_start}
+
+        - task_key: refresh_pipeline
+          depends_on:
+            - task_key: ingest_market_data
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.market_risk_pipeline.id}
+            full_refresh: false
+
+        - task_key: compute_risk
+          depends_on:
+            - task_key: refresh_pipeline
+          environment_key: default
+          python_wheel_task:
+            package_name: market_risk
+            entry_point: compute_risk
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${resources.schemas.market_risk.name}
+
+        - task_key: data_quality_checks
+          depends_on:
+            - task_key: compute_risk
+          environment_key: default
+          python_wheel_task:
+            package_name: market_risk
+            entry_point: run_quality_checks
+            parameters:
+              - --catalog
+              - ${var.catalog}
+              - --schema
+              - ${resources.schemas.market_risk.name}
+
+      environments:
+        - environment_key: default
+          spec:
+            environment_version: "2"
+            dependencies:
+              - ../dist/*.whl
