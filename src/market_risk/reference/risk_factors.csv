@@ -1,0 +1,9 @@
+risk_factor_id,risk_factor_name,asset_class,source,source_series_id,quote_currency,description
+EQ_SPX,S&P 500,EQUITY_INDEX,FRED,SP500,USD,S&P 500 index daily close (FRED series SP500)
+EQ_NASDAQ,NASDAQ Composite,EQUITY_INDEX,FRED,NASDAQCOM,USD,NASDAQ Composite index daily close (FRED series NASDAQCOM)
+EQ_DJIA,Dow Jones Industrial Average,EQUITY_INDEX,FRED,DJIA,USD,Dow Jones Industrial Average daily close (FRED series DJIA)
+EQ_N225,Nikkei 225,EQUITY_INDEX,FRED,NIKKEI225,JPY,Nikkei 225 stock average daily close (FRED series NIKKEI225)
+FX_USD,US dollar,FX,ECB,USD,USD,ECB euro foreign exchange reference rate (USD per 1 EUR)
+FX_JPY,Japanese yen,FX,ECB,JPY,JPY,ECB euro foreign exchange reference rate (JPY per 1 EUR)
+FX_GBP,Pound sterling,FX,ECB,GBP,GBP,ECB euro foreign exchange reference rate (GBP per 1 EUR)
+FX_CHF,Swiss franc,FX,ECB,CHF,CHF,ECB euro foreign exchange reference rate (CHF per 1 EUR)

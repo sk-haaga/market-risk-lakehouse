@@ -1,0 +1,9 @@
+position_id,portfolio_id,book,instrument_type,risk_factor_id,quantity,quantity_unit,description
+P001,GLOBAL_MACRO,EQUITY,EQUITY_INDEX,EQ_SPX,350,index_units,Long S&P 500 index exposure (multiplier 1)
+P002,GLOBAL_MACRO,EQUITY,EQUITY_INDEX,EQ_NASDAQ,90,index_units,Long NASDAQ Composite index exposure (multiplier 1)
+P003,GLOBAL_MACRO,EQUITY,EQUITY_INDEX,EQ_DJIA,25,index_units,Long Dow Jones Industrial Average exposure (multiplier 1)
+P004,GLOBAL_MACRO,EQUITY,EQUITY_INDEX,EQ_N225,1500,index_units,Long Nikkei 225 index exposure (multiplier 1)
+P005,GLOBAL_MACRO,FX,FX_CASH,FX_USD,750000,currency_units,USD cash balance
+P006,GLOBAL_MACRO,FX,FX_CASH,FX_GBP,-400000,currency_units,Short GBP cash (funding)
+P007,GLOBAL_MACRO,FX,FX_CASH,FX_CHF,300000,currency_units,CHF cash balance
+P008,GLOBAL_MACRO,FX,FX_CASH,FX_JPY,-60000000,currency_units,Short JPY cash (funding)
